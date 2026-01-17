@@ -261,14 +261,18 @@ def analyze_resume():
         db.session.add(verification)
     db.session.commit()
 
-    # Final response 
-    return jsonify({
+    final_response = { # this will go to the frontend
         "message": "Resume analyzed successfully",
-        "platform":platform.platform_name,
-        "responce":final_ml_results
-    }), 200
+        "platform": platform.platform_name,
+        "response": final_ml_results
+    }
 
+    resume.analysis_json = final_response # here the resume analysis will get store in the database for future use
+    db.session.commit()
 
+    return jsonify(final_response), 200
+
+    
 
 @app.route("/resumes") # showing past uploaded resumes
 def past_resumes():
@@ -290,8 +294,9 @@ def past_resumes():
     ])
 
 
-@app.route("/resume/<int:resume_id>") # select a resume -> summary view
-def resume_analysis(resume_id):
+
+@app.route("/resume/<int:resume_id>") # showing the past resume after clicking the resume in the past/history resumes section
+def get_resume_analysis(resume_id):
     if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -307,40 +312,8 @@ def resume_analysis(resume_id):
     if not resume:
         return jsonify({"error": "Resume not found"}), 404
 
-    # Collect all skill claims
-    claims = Skillclaims.query.filter_by(resume_id=resume.resume_id).all()
-
-    platforms_map = {}
-    skills_map = {}
-
-    for claim in claims:
-        verifications = ClaimVerification.query.filter_by(
-            claim_id=claim.claim_id
-        ).all()
-
-        for v in verifications:
-            platform = Platforms.query.get(v.platform_id)
-
-            # Group by platform
-            if platform.platform_name not in platforms_map:
-                platforms_map[platform.platform_name] = {}
-
-            platforms_map[platform.platform_name][claim.skill_name] = v.evaluation_json
-
-            # Optional: flat skill-wise view
-            skills_map[claim.skill_name] = {
-                "platform": platform.platform_name,
-                "evaluation": v.evaluation_json
-            }
-
-    return jsonify({
-        "message": "Resume analyzed successfully",
-        "resume_id": resume.resume_id,
-        "uploaded_at": resume.uploaded_at,
-        "platforms": platforms_map,   
-        "skills": skills_map          
-    })
-
+    return jsonify(resume.analysis_json) # this json send file is exactally what /anlyze retuens.
+ 
 
 
 @app.route("/profile")

@@ -28,6 +28,7 @@ class Resumes(db.Model):
     candidate_id = db.Column(db.Integer, db.ForeignKey("candidates.candidate_id"), nullable=False )
     resume_path = db.Column(db.String(255), nullable=False)
     uploaded_at = db.Column(db.DateTime, default= lambda: datetime.now(timezone.utc), nullable=False)
+    analysis_json = db.Column(db.JSON, nullable=False)  # EXACT analyze output, anlysis of each resume
 
     
 class Skillclaims(db.Model):
@@ -52,6 +53,4 @@ class ClaimVerification(db.Model): # actual tablename is Claim_verification
     __table_args__ = (
     db.UniqueConstraint("claim_id", "platform_id"),
     )
-
-
 
