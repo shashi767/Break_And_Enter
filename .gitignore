@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+
+bae_env/
+venv/
+.env/
+
+instance/
+*.db
+
+.DS_Store
+
+config.py 
