@@ -8,9 +8,21 @@ import pdfplumber
 import docx
 import json
 from config import SQLALCHEMY_DATABASE_URI, SQLALCHEMY_TRACK_MODIFICATIONS
+from flask_cors import CORS
+
+
 
 
 app = Flask(__name__)
+from flask_cors import CORS
+
+CORS(app, supports_credentials=True)
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=False
+)
+
+
 
 app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = SQLALCHEMY_TRACK_MODIFICATIONS
@@ -391,3 +403,6 @@ def update_profile():
 
 with app.app_context():
     db.create_all()
+
+if __name__ == "__main__":
+    app.run(debug=True)
