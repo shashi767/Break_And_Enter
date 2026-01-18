@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 class Users(db.Model):
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     email = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash = db.Column(PasswordType(schemes=['pbkdf2_sha512']), nullable=True)
+    password_hash = db.Column(PasswordType(schemes=['pbkdf2_sha512']), nullable=False)
     role = db.Column(db.String(20), db.CheckConstraint("role IN ('candidate', 'recruiter')"), nullable=False)
     created_at = db.Column(db.DateTime, default= lambda: datetime.now(timezone.utc) , nullable=False)
 
@@ -13,7 +13,7 @@ class Users(db.Model):
 class Candidates(db.Model):
     candidate_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.user_id"), unique=True, nullable=False )
-    full_name = db.Column(db.String(100))
+    full_name = db.Column(db.String(100), nullable=False)
     experience_years = db.Column(db.Integer)
 
 
@@ -28,7 +28,7 @@ class Resumes(db.Model):
     candidate_id = db.Column(db.Integer, db.ForeignKey("candidates.candidate_id"), nullable=False )
     resume_path = db.Column(db.String(255), nullable=False)
     uploaded_at = db.Column(db.DateTime, default= lambda: datetime.now(timezone.utc), nullable=False)
-    analysis_json = db.Column(db.JSON, nullable=False)  # EXACT analyze output, anlysis of each resume
+    analysis_json = db.Column(db.JSON, nullable=True)  # EXACT analyze output, anlysis of each resume
 
     
 class Skillclaims(db.Model):

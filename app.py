@@ -8,16 +8,67 @@ import pdfplumber
 import docx
 import json
 from config import SQLALCHEMY_DATABASE_URI, SQLALCHEMY_TRACK_MODIFICATIONS
+from flask_cors import CORS # for frontend
+import fitz
+from flask_migrate import Migrate # for migrating the old database to updated database
 
+DEMO_MODE = True # for the judges only, for coming in the normal form just do it False.
 
 app = Flask(__name__)
+CORS(app, supports_credentials=True, origins=["http://localhost:5173"]) # for frontend # thiis allws : session, cookies, fetch request from React
+os.makedirs("uploads", exist_ok=True) # Upload folder may not exist
+
 
 app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = SQLALCHEMY_TRACK_MODIFICATIONS
 app.secret_key = "hkjndn7499034nhefui57{ew7672ghwi1lkha_klkldawqsnlcedclrp"
+app.config.update(
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=False , # True only in HTTPS
+    SESSION_COOKIE_HTTPONLY=True, 
+    SESSION_PERMANENT = True
+)
 
 
 db.init_app(app)
+migrate = Migrate(app, db) # for migrating the database
+
+
+# this is only for DEMO USER 
+def get_or_create_demo_user():
+    demo_email = "demo@judge.com"
+
+    user = Users.query.filter_by(email=demo_email).first()
+
+    if not user:
+        user = Users(
+            email=demo_email,
+            password_hash="demo",  # not used
+            role="candidate"
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        candidate = Candidates(
+            user_id=user.user_id,
+            full_name="Demo Judge",
+            experience_years=10
+        )
+        db.session.add(candidate)
+        db.session.commit()
+
+    return user
+
+# AUTO-LOGIN middleware : it will be triggered when judge will use this. 
+# @app.before_request
+# def auto_login_demo_user():
+#     if DEMO_MODE and "user_id" not in session:
+#         user = get_or_create_demo_user()
+#         # session.permanent = True # forces cookie creation
+#         session.clear() # clearing all the coockis 
+#         session["user_id"] = user.user_id
+#         session["role"] = user.role
+
 
 
 @app.route("/signup", methods=["POST"])
@@ -69,7 +120,26 @@ def logout():
 
 @app.route("/dashboard")
 def dashboard():
-    if "user_id" not in session: # checking, user is signed in or not.
+    # if not DEMO_MODE and "user_id" not in session: # checking, user is signed in or not.
+    #     return jsonify({"error": "Unauthorized"}), 401
+
+    # if DEMO_MODE:
+    #     user = get_or_create_demo_user()
+    #     session.clear()           # important
+    #     session["user_id"] = user.user_id
+    #     session["role"] = user.role
+
+    # elif "user_id" not in session:
+    #     return jsonify({"error": "Unauthorized"}), 401
+
+    if DEMO_MODE and "user_id" not in session:
+        user = get_or_create_demo_user()
+        session.clear()
+        session["user_id"] = user.user_id
+        session["role"] = user.role
+
+    # 🔹 Case 2: Normal mode + not logged in
+    if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     return jsonify({
@@ -94,20 +164,39 @@ def dashboard():
     })
 
 
-# 1. Extract raw text (ALL formats)
-def extract_text(file_path):
+# Extracting the text and link from the .pdf, .docx, .tex files
+def extract_text_and_links(file_path):
     text = ""
+    links = []
 
+    # if PDF file----------
     if file_path.endswith(".pdf"):
+        # Extract visible text
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
                 text += page.extract_text() or ""
 
+        # Extract clickable links
+        doc = fitz.open(file_path)
+        for page in doc:
+            for link in page.get_links():
+                uri = link.get("uri")
+                if uri:
+                    links.append(uri)
+
+    # if DOCX file-----------
     elif file_path.endswith(".docx"):
         doc = docx.Document(file_path)
+
         for para in doc.paragraphs:
             text += para.text + "\n"
 
+        # Extract hyperlinks
+        for rel in doc.part.rels.values():
+            if "http" in rel.target_ref:
+                links.append(rel.target_ref)
+
+    # if TEX file----------
     elif file_path.endswith(".tex"):
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
@@ -117,15 +206,15 @@ def extract_text(file_path):
         text = re.sub(r"\\[a-zA-Z]+", " ", text)
         text = re.sub(r"\{|\}", " ", text)
 
-    return text.lower()
+    return text.lower(), links
 
-
-# 2. Skill Extraction (same as before)
+# all skills
 KNOWN_SKILLS = [
     "python", "c", "c++", "java", "javascript",
     "html", "css", "sql", "flask", "django",
     "react", "node", "machine learning", "deep learning"
 ]
+# extracting the known skills from the text
 def extract_skills(text):
     found_skills = set()
 
@@ -136,24 +225,27 @@ def extract_skills(text):
 
     return list(found_skills)
 
-# 3. GitHub Username Extraction (LaTeX-safe)
-def extract_github_username(text):
-    match = re.search(
-        r"github\.com/([a-zA-Z0-9_-]+)",
-        text
-    )
-
+# extracting the github username from the text
+def extract_github_username(text, links):
+    # 1. Try visible text first
+    match = re.search(r"github\.com/([a-zA-Z0-9_-]+)", text)
     if match:
         return match.group(1)
 
+    # 2. Try clickable links
+    for link in links:
+        match = re.search(r"github\.com/([a-zA-Z0-9_-]+)", link)
+        if match:
+            return match.group(1)
+
     return None
 
-# 4. Final Unified Parser (CLEAN)
+# final function for for extracting the skills and github username
 def parse_resume(file_path):
-    text = extract_text(file_path)
+    text, links = extract_text_and_links(file_path)
 
     skills = extract_skills(text)
-    github_username = extract_github_username(text)
+    github_username = extract_github_username(text, links)
 
     return {
         "skills": skills,
@@ -161,9 +253,10 @@ def parse_resume(file_path):
     }
 
 
+
 @app.route("/analyze", methods=["POST"])
 def analyze_resume():
-    if "user_id" not in session:
+    if not DEMO_MODE and "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     resume_file = request.files.get("resume") #fetching the resume file
@@ -274,9 +367,10 @@ def analyze_resume():
 
     
 
-@app.route("/resumes") # showing past uploaded resumes
+# showing past uploaded resumes
+@app.route("/resumes") 
 def past_resumes():
-    if "user_id" not in session:
+    if not DEMO_MODE and "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     candidate = Candidates.query.filter_by(user_id=session["user_id"]).first()
@@ -294,10 +388,10 @@ def past_resumes():
     ])
 
 
-
-@app.route("/resume/<int:resume_id>") # showing the past resume after clicking the resume in the past/history resumes section
+# showing the past resume after clicking the resume in the past/history resumes section
+@app.route("/resume/<int:resume_id>") 
 def get_resume_analysis(resume_id):
-    if "user_id" not in session:
+    if not DEMO_MODE and "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     candidate = Candidates.query.filter_by(user_id=session["user_id"]).first()
@@ -318,7 +412,7 @@ def get_resume_analysis(resume_id):
 
 @app.route("/profile")
 def profile():
-    if "user_id" not in session:
+    if not DEMO_MODE and "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     candidate = Candidates.query.filter_by(
@@ -337,7 +431,7 @@ def profile():
 
 @app.route("/profile/update", methods=["POST"])
 def update_profile():
-    if "user_id" not in session:
+    if not DEMO_MODE and "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
 
     candidate = Candidates.query.filter_by(
@@ -361,6 +455,6 @@ def update_profile():
 
     return jsonify({"message": "Profile updated successfully"})
 
-
-with app.app_context():
-    db.create_all()
+# creating the database columns if not exist 
+# with app.app_context():
+#     db.create_all()
