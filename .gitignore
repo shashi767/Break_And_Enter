@@ -11,3 +11,5 @@ instance/
 .DS_Store
 
 config.py 
+
+frontend/
